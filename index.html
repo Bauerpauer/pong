@@ -15,6 +15,19 @@
       margin: 40px auto;
       box-shadow: 0 0px 10px 13px rgba(0,0,0,0.55);
     }
+
+    @media screen {
+      #cert { display: none; }
+    }
+
+    @media print {
+
+      body {
+        background-color: transparent;
+      }
+
+      canvas { display: none; }
+    }
   </style>
   <body>
     <!--
@@ -23,12 +36,61 @@
         <label>P1 Paddle Hit Y<input id="p1PaddleHitY"></label
     </div>
     -->
+    <div id="cert">
+      <img src="/images/cert.jpg" style="margin: 0 auto; max-width: 100%;">
+      <span id="playerName" style="
+        color: black;
+        position: absolute;
+        top: 460px;
+        left: 48%;
+        font-size: 37px;
+        transform: rotate(90deg);
+        font-family: cursive;">Joe Somebody</span>
+      <span style="
+        color: black;
+        position: absolute;
+        top: 460px;
+        left: 30%;
+        font-size: 37px;
+        transform: rotate(90deg);
+        font-family: cursive;">Winning Pong</span>
+      <span id="certDate" style="
+        color: black;
+        position: absolute;
+        top: 250px;
+        left: 14.65%;
+        font-size: 27px;
+        transform: rotate(90deg);
+        font-family: cursive;">stuff</span>
+      <span style="
+        color: black;
+        position: absolute;
+        top: 662px;
+        left: 16.25%;
+        font-size: 27px;
+        transform: rotate(90deg);
+        font-family: cursive;">The Pong Master</span>
+    </div>
   </body>
 
+  <script src="https://code.jquery.com/jquery-3.1.0.slim.min.js" integrity="sha256-cRpWjoSOw5KcyIOaZNo4i6fZ9tKPhYYb6i5T9RSVJG8=" crossorigin="anonymous"></script>
   <script src="/bower_components/pixi.js/bin/pixi.js"></script>
   <script src="/bower_components/pixi-particles/dist/pixi-particles.js"></script>
   <script src="/bower_components/howler.js/dist/howler.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.14.1/moment.min.js"></script>
   <script>
+    $(function() {
+      $("#certDate").text(moment().format('MMMM Do, YYYY'));
+    });
+
+    function sfx(path) {
+      return new Howl({
+        src: ["/sounds/effects/" + path],
+        autoplay: false,
+        loop: false
+      });
+    }
+
     const SOUNDS = {
       bg: new Howl({
         // src: ['sound.webm', 'sound.mp3', 'sound.wav'],
@@ -41,23 +103,10 @@
         }
       }),
 
-      paddleBounce: new Howl({
-        src: ["/sounds/effects/laser-paddle-bounce.wav"],
-        autoplay: false,
-        loop: false
-      }),
-
-      fieldBounce: new Howl({
-        src: ["/sounds/effects/field-bounce.wav"],
-        autoplay: false,
-        loop: false
-      }),
-
-      lose: new Howl({
-        src: ["/sounds/effects/lose.wav"],
-        autoplay: false,
-        loop: false
-      })
+      paddleBounce: sfx("laser-paddle-bounce.wav"),
+      fieldBounce: sfx("field-bounce.wav"),
+      lose: sfx("lose.wav"),
+      explosion: sfx("explosion.wav"),
     }
 
     const DIRECTION_LEFT = 0;
@@ -75,6 +124,8 @@
     const KEY_k = 75
     const KEY_m = 77
 
+    const DEFAULT_PADDLE_VELOCITY = 8;
+
     // Player 1 Up/Down
     const PLAYER1_UP = KEY_a
     const PLAYER1_DOWN = KEY_z
@@ -90,9 +141,14 @@
       left: 24
     }
 
+    const MAX_EXTRAS_ALLOWED_ON_FIELD = 1;
+
+    var extras = [];
+    const EXTRA_RATE = 5000; // every 5 seconds
+    const WIN_SCORE = 5;
+
     var player1Score = 0;
     var player2Score = 0;
-
 
     //Aliases
     var Container = PIXI.Container,
@@ -121,6 +177,7 @@
       .add("images/paddles/neon-green.png")
       .add("images/paddles/neon-purple.png")
       .add("images/particles/death-blast.png")
+      .add("images/extras/bomb.png")
       .on("progress", loadProgressHandler)
       .load(setup);
 
@@ -134,7 +191,7 @@
       console.log("progress: " + loader.progress + "%");
     }
 
-    var elapsed = Date.now();
+    var emitterElapsed = Date.now();
 
     // Create a new emitter
     var emitter = new PIXI.particles.Emitter(
@@ -194,9 +251,63 @@
 			}
     );
 
+    var bombExplosionEmitter = new PIXI.particles.Emitter(
+      stage,
+      [PIXI.Texture.fromImage('images/particles/death-blast.png')],
+      {
+        "emit": false,
+				"alpha": {
+					"start": 0.8,
+					"end": 0.1
+				},
+				"scale": {
+					"start": 1,
+					"end": 0.3
+				},
+				"color": {
+					"start": "fb1010",
+					"end": "f5b830"
+				},
+				"speed": {
+					"start": 200,
+					"end": 100
+				},
+				"startRotation": {
+					"min": 0,
+					"max": 0
+				},
+				"rotationSpeed": {
+					"min": 0,
+					"max": 0
+				},
+				"lifetime": {
+					"min": 0.5,
+					"max": 0.5
+				},
+				"frequency": 0.008,
+				"emitterLifetime": 0.31,
+				"maxParticles": 1000,
+				"pos": {
+					"x": 0,
+					"y": 0
+				},
+				"addAtBack": false,
+				"spawnType": "ring",
+				"spawnCircle": {
+					"x": 0,
+					"y": 0,
+					"r": 40,
+					"minR": 39
+				}
+			}
+    );
 
     var ball, player1Paddle, player2Paddle, player1Score, player2Score;
     var state;
+    var timeLastExtraAdded;
+
+    const PLAYER_1 = 0;
+    const PLAYER_2 = 1;
 
     function setup() {
       ball = new Sprite(loader.resources["images/balls/neon-blue.png"].texture);
@@ -239,15 +350,24 @@
       player1ScoreLabel.position.set(FIELD.left + 30, 8);
       player2ScoreLabel.position.set(FIELD.right - 30, 8);
 
-      ball.position.set(FIELD.left + 10, 137);
-      player1Paddle.position.set(FIELD.left, 128);
-      player2Paddle.position.set(FIELD.right, 128);
+      resetPaddlesAndBall()
 
+      timeLastExtraAdded = Date.now();
+
+      state = playerStart(PLAYER_1);
       initControls();
-
-      state = play;
+      // state.initControls();
 
       gameLoop();
+    }
+
+    function resetPaddlesAndBall() {
+      ball.vx = 0;
+      ball.vy = 0;
+
+      ball.position.set(FIELD.left + 10, 256);
+      player1Paddle.position.set(FIELD.left, 256);
+      player2Paddle.position.set(FIELD.right, 256);
     }
 
     function initControls() {
@@ -260,24 +380,30 @@
 
       //P1 Up
       p1Up.press = function() {
-        player1Paddle.vy = -5;
+        player1Paddle.vy = -DEFAULT_PADDLE_VELOCITY;
+        player1Paddle.upPressed = true;
       };
       p1Up.release = function() {
         // if (!down.isDown && cat.vx === 0) {
           player1Paddle.vy = 0;
+          player1Paddle.upPressed = false;
         // }
       };
       //P1 Down
       p1Down.press = function() {
-        player1Paddle.vy = 5;
+        player1Paddle.vy = DEFAULT_PADDLE_VELOCITY;
+        player1Paddle.downPressed = true;
       };
       p1Down.release = function() {
         // if (!up.isDown && cat.vx === 0) {
           player1Paddle.vy = 0;
+          player1Paddle.downPressed = false;
         // }
       };
 
       fire.press = function() {
+        state = play;
+        emitterElapsed = Date.now();
         ball.vx = 5;
       }
     }
@@ -290,20 +416,74 @@
     }
 
     function reset() {
-      ball.vx = 0;
-      ball.vy = 0;
-      ball.position.set(FIELD.left + 10, 137);
+      resetPaddlesAndBall()
+      state = playerStart(PLAYER_1);
+    }
+
+    function playerStart(playerIndex) {
+      var s = function() {
+        updateParticles();
+
+        if (player1Paddle.upPressed) {
+          ball.y = Math.max(player1Paddle.y - ((player1Paddle.height - (15 * 2)) / 2), ball.y - 5);
+        } else if (player1Paddle.downPressed) {
+          ball.y = Math.min(player1Paddle.y + ((player1Paddle.height - (15 * 2)) / 2), ball.y + 5);
+        }
+      };
+
+      s.key = "start.p1";
+      return s;
+    }
+
+    var elapsed;
+
+    function updateParticles() {
+      // Update Particles
+      var now = Date.now();
+      elapsed = now - emitterElapsed;
+      emitter.update(elapsed * 0.001);
+      bombExplosionEmitter.update(elapsed * 0.001);
+      emitterElapsed = now;
     }
 
     function play() {
-      // Update Particles
-      var now = Date.now();
-      emitter.update((now - elapsed) * 0.001);
-      elapsed = now;
+      updateParticles();
 
+      var now = Date.now();
+
+      if ((Date.now() - timeLastExtraAdded) >= EXTRA_RATE) {
+        timeLastExtraAdded = now;
+
+        if (extras.length < MAX_EXTRAS_ALLOWED_ON_FIELD) {
+          var extra = new Sprite(loader.resources["images/extras/bomb.png"].texture);
+          extra.anchor.x = 0.5;
+          extra.anchor.y = 0.5;
+          extra.x = 512;
+          // extra.y = randomIntFromInterval(20, 492);
+          extra.y = 137
+
+          extras.push(extra);
+
+          stage.addChild(extra)
+        }
+      }
 
       player1Paddle.y += player1Paddle.vy;
       player2Paddle.y += player1Paddle.vy; // TODO: ADD PLAYER 2 CONTROLS!!!
+
+      extras.forEach(function(extra, i) {
+        if (hitTestRectangle(ball, extra)) {
+          bombExplosionEmitter.resetPositionTracking();
+          bombExplosionEmitter.updateOwnerPos(ball.x, ball.y);
+          bombExplosionEmitter.emit = true;
+          stage.removeChild(extra);
+          extras.splice(i, 1);
+          SOUNDS.explosion.play();
+          return reset();
+        } else {
+          // TODO: Do something with the bomb, make it less static
+        }
+      })
 
       if (ball.x <= FIELD.left) {
         SOUNDS.lose.play();
@@ -314,6 +494,9 @@
 
         // Player 2 Score
         player2Score += 1;
+        if (player1Score == WIN_SCORE) {
+          return win(PLAYER_2);
+        }
         player2ScoreLabel.text = player2Score;
         return reset();
       } else if (ball.x >= FIELD.right) {
@@ -326,6 +509,10 @@
         // Player 1 Score
         player1Score += 1;
         player1ScoreLabel.text = player1Score;
+
+        if (player1Score == WIN_SCORE) {
+          return win(PLAYER_1);
+        }
         return reset()
       }
 
@@ -359,6 +546,25 @@
         SOUNDS.paddleBounce.play();
         player1Paddle.alpha = 0.5;
       }
+    }
+
+    function resetGame() {
+      resetPaddlesAndBall();
+      updateParticles();
+      extras.forEach(function(extra, i) {
+        stage.removeChild(extra);
+      });
+      extras = [];
+    }
+
+    function win(playerIndex) {
+      resetGame();
+
+      state = playerStart(playerIndex);
+
+      var playerName = prompt("Player " + (playerIndex + 1) + ", thou art a true champion! What is thy name?")
+      $("#playerName").text(playerName);
+      window.print();
     }
 
     //The `keyboard` helper function
@@ -437,5 +643,8 @@
       return hit;
     };
 
+    function randomIntFromInterval(min, max) {
+      return Math.floor(Math.random() * (max - min + 1) + min);
+    }
   </script>
 </html>
