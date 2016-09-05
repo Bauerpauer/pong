@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<html>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-size: small;
+      background-color: #0e0e0e;
+    }
+
+    canvas {
+      margin: 40px auto;
+      box-shadow: 0 0px 10px 13px rgba(0,0,0,0.55);
+    }
+  </style>
+  <body>
+    <!--
+    <div style="position: absolute; bottom: 0; height: 100px; border-top: dotted 1px black; width: 100%;">
+      <label>Ball Coordinates<input id="ballCoordinates"></label
+        <label>P1 Paddle Hit Y<input id="p1PaddleHitY"></label
+    </div>
+    -->
+  </body>
+
+  <script src="/bower_components/pixi.js/bin/pixi.js"></script>
+  <script src="/bower_components/pixi-particles/dist/pixi-particles.js"></script>
+  <script src="/bower_components/howler.js/dist/howler.js"></script>
+  <script>
+    const SOUNDS = {
+      bg: new Howl({
+        // src: ['sound.webm', 'sound.mp3', 'sound.wav'],
+        src: ['/sounds/bg/RYMDREGLAGE - 8-Bit Trip.mp3'],
+        autoplay: true,
+        loop: true,
+        volume: 0.25,
+        onend: function() {
+          console.log('Finished!');
+        }
+      }),
+
+      paddleBounce: new Howl({
+        src: ["/sounds/effects/laser-paddle-bounce.wav"],
+        autoplay: false,
+        loop: false
+      }),
+
+      fieldBounce: new Howl({
+        src: ["/sounds/effects/field-bounce.wav"],
+        autoplay: false,
+        loop: false
+      }),
+
+      lose: new Howl({
+        src: ["/sounds/effects/lose.wav"],
+        autoplay: false,
+        loop: false
+      })
+    }
+
+    const DIRECTION_LEFT = 0;
+    const DIRECTION_RIGHT = 1;
+
+    const KEY_LEFT = 37;
+    const KEY_UP = 38;
+    const KEY_RIGHT = 39;
+    const KEY_DOWN = 40;
+
+    const KEY_SPACE = 32;
+
+    const KEY_a = 65
+    const KEY_z = 90
+    const KEY_k = 75
+    const KEY_m = 77
+
+    // Player 1 Up/Down
+    const PLAYER1_UP = KEY_a
+    const PLAYER1_DOWN = KEY_z
+
+    // Player 2 Up/Down
+    const PLAYER2_UP = KEY_k
+    const PLAYER2_DOWN = KEY_m
+
+    const FIELD = {
+      top: 0,
+      right: 1024 - 24,
+      bottom: 512,
+      left: 24
+    }
+
+    var player1Score = 0;
+    var player2Score = 0;
+
+
+    //Aliases
+    var Container = PIXI.Container,
+        autoDetectRenderer = PIXI.autoDetectRenderer,
+        loader = PIXI.loader,
+        resources = PIXI.loader.resources,
+        TextureCache = PIXI.utils.TextureCache,
+        Sprite = PIXI.Sprite;
+
+
+    var renderer = autoDetectRenderer(1024, 512);
+    document.body.appendChild(renderer.view);
+    var stage = new Container();
+
+    // Fill entire window
+    // renderer.view.style.position = "absolute"
+    // renderer.view.style.width = window.innerWidth + "px";
+    // renderer.view.style.height = window.innerHeight + "px";
+    renderer.view.style.display = "block";
+
+    renderer.render(stage);
+
+    loader
+      .add("images/balls/neon-blue.png")
+      .add("images/balls/weird-glow.png")
+      .add("images/paddles/neon-green.png")
+      .add("images/paddles/neon-purple.png")
+      .add("images/particles/death-blast.png")
+      .on("progress", loadProgressHandler)
+      .load(setup);
+
+    function loadProgressHandler(loader, resource) {
+      //Display the file `url` currently being loaded
+      console.log("loading: " + resource.url);
+      //If you gave your files names with the `add` method, you can access
+      //them like this
+      //console.log("loading: " + resource.name);
+      //Display the precentage of files currently loaded
+      console.log("progress: " + loader.progress + "%");
+    }
+
+    var elapsed = Date.now();
+
+    // Create a new emitter
+    var emitter = new PIXI.particles.Emitter(
+
+      // The PIXI.Container to put the emitter in
+      // if using blend modes, it's important to put this
+      // on top of a bitmap, and not use the root stage Container
+      stage,
+
+      // The collection of particle images to use
+      [PIXI.Texture.fromImage('images/particles/death-blast.png')],
+
+      // Emitter configuration, edit this to change the look
+      // of the emitter
+      {
+        "emit": false,
+  			"alpha": {
+  				"start": 0.8,
+  				"end": 0.7
+  			},
+  			"scale": {
+  				"start": 1,
+  				"end": 0.3
+  			},
+  			"color": {
+  				"start": "e3f9ff",
+  				"end": "0ec8f8"
+  			},
+  			"speed": {
+  				"start": 200,
+  				"end": 200
+  			},
+  			"startRotation": {
+  				"min": 0,
+  				"max": 0
+  			},
+  			"rotationSpeed": {
+  				"min": 0,
+  				"max": 0
+  			},
+  			"lifetime": {
+  				"min": 0.8,
+  				"max": 0.8
+  			},
+  			"frequency": 0.2,
+  			"emitterLifetime": 0.41,
+  			"maxParticles": 1000,
+  			"pos": {
+  				"x": 0,
+  				"y": 0
+  			},
+  			"addAtBack": false,
+  			"spawnType": "burst",
+  			"particlesPerWave": 8,
+  			"particleSpacing": 45,
+  			"angleStart": 0
+			}
+    );
+
+
+    var ball, player1Paddle, player2Paddle, player1Score, player2Score;
+    var state;
+
+    function setup() {
+      ball = new Sprite(loader.resources["images/balls/neon-blue.png"].texture);
+      ball.anchor.x = 0.5;
+      ball.anchor.y = 0.5;
+      ball.vx = 0;
+      ball.vy = 0;
+
+      player1Paddle = new Sprite(loader.resources["images/paddles/neon-green.png"].texture);
+      player1Paddle.anchor.x = 0.5;
+      player1Paddle.anchor.y = 0.5;
+      player1Paddle.vy = 0;
+
+      player2Paddle = new Sprite(loader.resources["images/paddles/neon-purple.png"].texture);
+      player2Paddle.anchor.x = 0.5;
+      player2Paddle.anchor.y = 0.5;
+      player2Paddle.vy = 0;
+
+      player1ScoreLabel = new PIXI.Text(
+        "0",
+        {font: "18px sans-serif", fill: "white"}
+      );
+      player1ScoreLabel.anchor.x = 0.5;
+      player1ScoreLabel.anchor.y = 0;
+
+      player2ScoreLabel = new PIXI.Text(
+        "0",
+        {font: "18px sans-serif", fill: "white"}
+      );
+      player2ScoreLabel.anchor.x = 0.5;
+      player2ScoreLabel.anchor.y = 0;
+
+      stage.addChild(player1ScoreLabel);
+      stage.addChild(player2ScoreLabel);
+
+      stage.addChild(player1Paddle);
+      stage.addChild(player2Paddle);
+      stage.addChild(ball);
+
+      player1ScoreLabel.position.set(FIELD.left + 30, 8);
+      player2ScoreLabel.position.set(FIELD.right - 30, 8);
+
+      ball.position.set(FIELD.left + 10, 137);
+      player1Paddle.position.set(FIELD.left, 128);
+      player2Paddle.position.set(FIELD.right, 128);
+
+      initControls();
+
+      state = play;
+
+      gameLoop();
+    }
+
+    function initControls() {
+      //Capture the keyboard arrow keys
+      var p1Up = keyboard(KEY_a),
+          p1Down = keyboard(KEY_z),
+          p2Up = keyboard(KEY_k),
+          p2Down = keyboard(KEY_m),
+          fire = keyboard(KEY_SPACE);
+
+      //P1 Up
+      p1Up.press = function() {
+        player1Paddle.vy = -5;
+      };
+      p1Up.release = function() {
+        // if (!down.isDown && cat.vx === 0) {
+          player1Paddle.vy = 0;
+        // }
+      };
+      //P1 Down
+      p1Down.press = function() {
+        player1Paddle.vy = 5;
+      };
+      p1Down.release = function() {
+        // if (!up.isDown && cat.vx === 0) {
+          player1Paddle.vy = 0;
+        // }
+      };
+
+      fire.press = function() {
+        ball.vx = 5;
+      }
+    }
+
+    function gameLoop(){
+      //Loop this function 60 times per second
+      requestAnimationFrame(gameLoop);
+      state();
+      renderer.render(stage);
+    }
+
+    function reset() {
+      ball.vx = 0;
+      ball.vy = 0;
+      ball.position.set(FIELD.left + 10, 137);
+    }
+
+    function play() {
+      // Update Particles
+      var now = Date.now();
+      emitter.update((now - elapsed) * 0.001);
+      elapsed = now;
+
+
+      player1Paddle.y += player1Paddle.vy;
+      player2Paddle.y += player1Paddle.vy; // TODO: ADD PLAYER 2 CONTROLS!!!
+
+      if (ball.x <= FIELD.left) {
+        SOUNDS.lose.play();
+
+        emitter.resetPositionTracking();
+        emitter.updateOwnerPos(ball.x, ball.y);
+        emitter.emit = true;
+
+        // Player 2 Score
+        player2Score += 1;
+        player2ScoreLabel.text = player2Score;
+        return reset();
+      } else if (ball.x >= FIELD.right) {
+        SOUNDS.lose.play();
+
+        emitter.resetPositionTracking();
+        emitter.updateOwnerPos(ball.x, ball.y);
+        emitter.emit = true;
+
+        // Player 1 Score
+        player1Score += 1;
+        player1ScoreLabel.text = player1Score;
+        return reset()
+      }
+
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      // Field Top/Bottom Bounce
+      if (ball.y <= FIELD.top || ball.y >= FIELD.bottom) {
+        SOUNDS.fieldBounce.play();
+        ball.vy *= -1;
+      }
+
+      if (player1Paddle.alpha < 1.0) {
+        player1Paddle.alpha += 0.02;
+      }
+
+      if (player2Paddle.alpha < 1.0) {
+        player2Paddle.alpha += 0.02;
+      }
+
+      if ((ball.x + (ball.width / 2)) >= player2Paddle.x && ball.y >= player2Paddle.y - (player2Paddle.height / 2) && ball.y <= player2Paddle.y + (player2Paddle.height / 2)) {
+        // We hit player 2's paddle
+        ball.vx = -5;
+        ball.vy = (ball.y - player2Paddle.y) / 4;
+        SOUNDS.paddleBounce.play();
+        player2Paddle.alpha = 0.5;
+      } else if ((ball.x - (ball.width / 2)) <= player1Paddle.x && ball.y >= player1Paddle.y - (player1Paddle.height / 2) && ball.y <= player1Paddle.y + (player1Paddle.height / 2)) {
+        // We hit player 1's paddle
+        ball.vx = 5;
+        ball.vy = (ball.y - player1Paddle.y) / 4;
+        SOUNDS.paddleBounce.play();
+        player1Paddle.alpha = 0.5;
+      }
+    }
+
+    //The `keyboard` helper function
+    function keyboard(keyCode) {
+      var key = {};
+      key.code = keyCode;
+      key.isDown = false;
+      key.isUp = true;
+      key.press = undefined;
+      key.release = undefined;
+      //The `downHandler`
+      key.downHandler = function(event) {
+        if (event.keyCode === key.code) {
+          if (key.isUp && key.press) key.press();
+          key.isDown = true;
+          key.isUp = false;
+        }
+        event.preventDefault();
+      };
+      //The `upHandler`
+      key.upHandler = function(event) {
+        if (event.keyCode === key.code) {
+          if (key.isDown && key.release) key.release();
+          key.isDown = false;
+          key.isUp = true;
+        }
+        event.preventDefault();
+      };
+      //Attach event listeners
+      window.addEventListener(
+        "keydown", key.downHandler.bind(key), false
+      );
+      window.addEventListener(
+        "keyup", key.upHandler.bind(key), false
+      );
+      return key;
+    }
+
+    //The `hitTestRectangle` function
+    function hitTestRectangle(r1, r2) {
+      //Define the variables we'll need to calculate
+      var hit, combinedHalfWidths, combinedHalfHeights, vx, vy;
+      //hit will determine whether there's a collision
+      hit = false;
+      //Find the center points of each sprite
+      r1.centerX = r1.x + r1.width / 2;
+      r1.centerY = r1.y + r1.height / 2;
+      r2.centerX = r2.x + r2.width / 2;
+      r2.centerY = r2.y + r2.height / 2;
+      //Find the half-widths and half-heights of each sprite
+      r1.halfWidth = r1.width / 2;
+      r1.halfHeight = r1.height / 2;
+      r2.halfWidth = r2.width / 2;
+      r2.halfHeight = r2.height / 2;
+      //Calculate the distance vector between the sprites
+      vx = r1.centerX - r2.centerX;
+      vy = r1.centerY - r2.centerY;
+      //Figure out the combined half-widths and half-heights
+      combinedHalfWidths = r1.halfWidth + r2.halfWidth;
+      combinedHalfHeights = r1.halfHeight + r2.halfHeight;
+      //Check for a collision on the x axis
+      if (Math.abs(vx) < combinedHalfWidths) {
+        //A collision might be occuring. Check for a collision on the y axis
+        if (Math.abs(vy) < combinedHalfHeights) {
+          //There's definitely a collision happening
+          hit = true;
+        } else {
+          //There's no collision on the y axis
+          hit = false;
+        }
+      } else {
+        //There's no collision on the x axis
+        hit = false;
+      }
+      //`hit` will be either `true` or `false`
+      return hit;
+    };
+
+  </script>
+</html>
